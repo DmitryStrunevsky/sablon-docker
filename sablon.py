@@ -6,6 +6,8 @@ A tiny aiohttp based web server that wraps the sablon Ruby script.
 It expects a multipart/form-data upload containing a .docx document with the
 name template and a JSON part named context containing variable values.
 """
+import base64
+import json
 from aiohttp import web
 import asyncio
 import logging
@@ -22,26 +24,18 @@ async def sablon(request):
     form_data = {}
     temp_dir = None
 
-    if not request.content_type == 'multipart/form-data':
+    if not request.content_type == 'application/json':
         logger.info(
-            'Bad request. Received content type %s instead of multipart/form-data.',
+            'Bad request. Received content type %s instead of application/json.',
             request.content_type,
         )
-        return web.Response(status=400, text="Multipart request required.")
+        return web.Response(status=400, text="application/json request required.")
 
-    reader = await request.multipart()
-
+    data = await request.json()
+    
     with tempfile.TemporaryDirectory() as temp_dir:
-        while True:
-            part = await reader.next()
-
-            if part is None:
-                break
-
-            if part.name == 'template':
-                form_data['template'] = await save_part_to_file(part, temp_dir)
-            elif part.name == 'context':
-                form_data['context'] = await part.text()
+        form_data['template'] = await save_part_to_file(data["template_base64"], temp_dir)
+        form_data['context'] = json.dumps(data["context"])
 
         if 'context' in form_data and 'template' in form_data:
             outfilename = os.path.join(temp_dir, 'output.docx')
@@ -87,13 +81,9 @@ async def sablon(request):
 
 
 async def save_part_to_file(part, directory):
-    filename = os.path.join(directory, part.filename)
-    with open(os.path.join(directory, filename), 'wb') as file_:
-        while True:
-            chunk = await part.read_chunk(CHUNK_SIZE)
-            if not chunk:
-                break
-            file_.write(chunk)
+    filename = os.path.join(directory, "template.docx")
+    with open(filename, "wb") as fh:
+        fh.write(base64.decodebytes(bytes(part, "utf-8")))
     return filename
 
 
